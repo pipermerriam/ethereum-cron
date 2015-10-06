@@ -144,24 +144,24 @@ contract DateTime {
                 return year;
         }
 
-        function getMonth(uint timestamp) constant returns (uint8) {
+        function getMonth(uint timestamp) constant returns (uint16) {
                 return parseTimestamp(timestamp).month;
         }
 
-        function getDay(uint timestamp) constant returns (uint8) {
+        function getDay(uint timestamp) constant returns (uint16) {
                 return parseTimestamp(timestamp).day;
         }
 
-        function getHour(uint timestamp) constant returns (uint8) {
-                return uint8((timestamp / 60 / 60) % 24);
+        function getHour(uint timestamp) constant returns (uint16) {
+                return uint16((timestamp / 60 / 60) % 24);
         }
 
-        function getMinute(uint timestamp) constant returns (uint8) {
-                return uint8((timestamp / 60) % 60);
+        function getMinute(uint timestamp) constant returns (uint16) {
+                return uint16((timestamp / 60) % 60);
         }
 
-        function getSecond(uint timestamp) constant returns (uint8) {
-                return uint8(timestamp % 60);
+        function getSecond(uint timestamp) constant returns (uint16) {
+                return uint16(timestamp % 60);
         }
 
         function getWeekday(uint timestamp) constant returns (uint8) {
@@ -235,160 +235,5 @@ contract DateTime {
         function __throw() {
                 uint[] arst;
                 arst[1];
-        }
-}
-
-
-contract Crontab is DateTime {
-        /*
-         *  Crontab parsing implementation.
-         *  - https://en.wikipedia.org/wiki/Cron#CRON_expression
-         */
-
-        byte constant STAR = '*';
-
-        function _now() constant returns (uint) {
-                return now;
-        }
-
-        function next(bytes2 ct_second, bytes2 ct_minute, bytes2 ct_hour, bytes2 ct_day, bytes2 ct_month, bytes2 ct_weekday, bytes2 ct_year) constant returns (uint) {
-                /*
-                 *  Given the 7 possible parts of a crontab entry, return the
-                 *  next timestamp that this entry should be executed.
-                 *
-                 *  Currently only supports `*` or a single number.
-                 */
-                uint extraSeconds;
-                uint16 buf;
-
-                DateTime ct_next;
-
-                buf = uint16(getSecond(now));
-                ct_next.second = uint8(nextMatch(buf, ct_second, 59));
-
-                if (ct_next.second < buf) {
-                        extraSeconds += 60 - (buf - ct_next.second);
-                }
-
-                buf = uint16(getMinute(now + extraSeconds));
-                ct_next.minute = uint8(nextMatch(buf, ct_minute, 59));
-
-                if (ct_next.minute < buf) {
-                        extraSeconds += MINUTE_IN_SECONDS * (60 - (buf - ct_next.minute));
-                }
-
-                buf = uint16(getHour(now + extraSeconds));
-                ct_next.hour = uint8(nextMatch(buf, ct_hour, 59));
-
-                if (ct_next.hour < buf) {
-                        extraSeconds += HOUR_IN_SECONDS * (24 - (buf - ct_next.hour));
-                }
-
-                buf = uint16(getDay(now + extraSeconds));
-                uint8 _month = getMonth(now + extraSeconds);
-                uint16 _year = getYear(now + extraSeconds);
-                ct_next.day = uint8(nextMatch(buf, ct_day, getDaysInMonth(_month, _year), false));
-                if (ct_next.day == 0x0) {
-                        // Rolled over to the next month.
-                        if (_month == 12) {
-                                _month = 1;
-                                _year += 1;
-                        }
-                        else {
-                                _month += 1;
-                        }
-                        ct_next.day = uint8(nextMatch(1, ct_day, min(buf - 1, getDaysInMonth(_month, _year)), false));
-                }
-
-                if (ct_next.day < buf) {
-                        extraSeconds += DAY_IN_SECONDS * (getDaysInMonth(getMonth(now + extraSeconds), getYear(now + extraSeconds)) - buf + ct_next.day);
-                }
-
-                buf = uint8(getMonth(now + extraSeconds));
-                ct_next.month = uint8(nextMatch(buf, ct_month, 12, false));
-
-                if (ct_next.month == 0x0) {
-                        if (buf == 12) {
-                                _month = 1;
-                        }
-                        else {
-                                _month = uint8(buf + 1);
-                        }
-                        ct_next.month = uint8(nextMatch(_month, ct_month, buf - 1, false));
-                }
-
-                if (ct_next.month < buf) {
-                        buf = getYear(now + extraSeconds) + 1;
-                }
-                else {
-                        buf = getYear(now + extraSeconds);
-                }
-
-                ct_next.year = nextMatch(buf, ct_year, 2099, false);
-                if (ct_next.year == 0x0) {
-                        return 0x0;
-                }
-
-                return toTimestamp(ct_next.year, ct_next.month, ct_next.day, ct_next.hour, ct_next.minute, ct_next.second);
-        }
-
-        function min(uint a, uint b) constant returns (uint) {
-                if (a <= b) {
-                        return a;
-                }
-                return b;
-        }
-
-        function _patternToNumber(bytes4 pattern) constant returns (uint16 res){
-                byte _byte;
-
-                _byte = byte(uint(pattern) / (2 ** 24));
-                if (_byte != 0x0) {
-                        res = 10 * res +  uint16(uint8(_byte) - 48);
-                }
-
-                _byte = byte(uint(pattern) / (2 ** 16));
-                if (_byte != 0x0) {
-                        res = 10 * res +  uint16(uint8(_byte) - 48);
-                }
-
-                _byte = byte(uint(pattern) / (2 ** 8));
-                if (_byte != 0x0) {
-                        res = 10 * res + uint16(uint8(_byte) - 48);
-                }
-
-                _byte = byte(uint(pattern));
-                if (_byte != 0x0) {
-                        res = 10 * res + uint16(uint8(_byte) - 48);
-                }
-
-                return res;
-        }
-
-        function nextMatch(uint16 startValue, bytes2 pattern, uint maximum) returns (uint16) {
-                return nextMatch(startValue, pattern, maximum, true);
-        }
-
-        function nextMatch(uint16 startValue, bytes2 pattern, uint maximum, bool allowRollover) returns (uint16) {
-                if (pattern == "*") {
-                        return startValue;
-                }
-
-                uint16 i;
-                uint16 patternValue = _patternToNumber(pattern);
-
-                for (i = startValue; i <= maximum; i++) {
-                        if (i == patternValue) {
-                                return i;
-                        }
-                }
-                if (allowRollover) {
-                        for (i = 0; i < startValue; i++) {
-                                if (i == patternValue) {
-                                        return i;
-                                }
-                        }
-                }
-                return 0x0;
         }
 }
