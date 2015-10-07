@@ -61,8 +61,6 @@ contract DateTime {
                 uint buf;
                 uint8 i;
 
-                dt.year = ORIGIN_YEAR;
-
                 // Year
                 dt.year = getYear(timestamp);
                 buf = leapYearsBefore(dt.year) - leapYearsBefore(ORIGIN_YEAR);
@@ -75,49 +73,32 @@ contract DateTime {
                 for (i = 1; i <= 12; i++) {
                         secondsInMonth = DAY_IN_SECONDS * getDaysInMonth(i, dt.year);
                         if (secondsInMonth + secondsAccountedFor > timestamp) {
-                                dt.month = i + 1;
+                                dt.month = i;
                                 break;
                         }
                         secondsAccountedFor += secondsInMonth;
                 }
 
                 // Day
-                for (i = 1; i < getDaysInMonth(dt.month, dt.year); i++) {
+                for (i = 1; i <= getDaysInMonth(dt.month, dt.year); i++) {
                         if (DAY_IN_SECONDS + secondsAccountedFor > timestamp) {
-                                dt.day = i + 1;
+                                dt.day = i;
                                 break;
                         }
                         secondsAccountedFor += DAY_IN_SECONDS;
                 }
 
                 // Hour
-                for (i = 0; i < 24; i++) {
-                        if (HOUR_IN_SECONDS + secondsAccountedFor > timestamp) {
-                                dt.hour = i;
-                                break;
-                        }
-                        secondsAccountedFor += HOUR_IN_SECONDS;
-                }
+                dt.hour = getHour(timestamp);
 
                 // Minute
-                for (i = 0; i < 60; i++) {
-                        if (MINUTE_IN_SECONDS + secondsAccountedFor > timestamp) {
-                                dt.minute = i;
-                                break;
-                        }
-                        secondsAccountedFor += MINUTE_IN_SECONDS;
-                }
-
-                if (timestamp - secondsAccountedFor > 60) {
-                        __throw();
-                }
+                dt.minute = getMinute(timestamp);
 
                 // Second
-                dt.second = uint8(timestamp - secondsAccountedFor);
+                dt.second = getSecond(timestamp);
 
                 // Day of week.
-                buf = timestamp / DAY_IN_SECONDS;
-                dt.weekday = uint8((buf + 3) % 7);
+                dt.weekday = getWeekday(timestamp);
         }
 
         function getYear(uint timestamp) constant returns (uint16) {
@@ -165,7 +146,7 @@ contract DateTime {
         }
 
         function getWeekday(uint timestamp) constant returns (uint8) {
-                return uint8((timestamp / DAY_IN_SECONDS + 3) % 7);
+                return uint8((timestamp / DAY_IN_SECONDS + 4) % 7);
         }
 
         function toTimestamp(uint16 year, uint8 month, uint8 day) constant returns (uint timestamp) {
@@ -251,85 +232,264 @@ contract Crontab is DateTime {
                 return now;
         }
 
+        function next(bytes2 ct_minute, bytes2 ct_hour, bytes2 ct_day, bytes2 ct_month, bytes2 ct_weekday, bytes2 ct_year) constant returns (uint) {
+                return next(0, ct_minute, ct_hour, ct_day, ct_month, ct_weekday, ct_year, now);
+        }
+
+        function next(bytes2 ct_minute, bytes2 ct_hour, bytes2 ct_day, bytes2 ct_month, bytes2 ct_weekday, bytes2 ct_year, uint timestamp) constant returns (uint) {
+                return next(0, ct_minute, ct_hour, ct_day, ct_month, ct_weekday, ct_year, timestamp);
+        }
+
         function next(bytes2 ct_second, bytes2 ct_minute, bytes2 ct_hour, bytes2 ct_day, bytes2 ct_month, bytes2 ct_weekday, bytes2 ct_year) constant returns (uint) {
+                return next(ct_second, ct_minute, ct_hour, ct_day, ct_month, ct_weekday, ct_year, now);
+        }
+
+        function next(bytes2 ct_second, bytes2 ct_minute, bytes2 ct_hour, bytes2 ct_day, bytes2 ct_month, bytes2 ct_weekday, bytes4 ct_year, uint timestamp) constant returns (uint) {
                 /*
                  *  Given the 7 possible parts of a crontab entry, return the
                  *  next timestamp that this entry should be executed.
                  *
                  *  Currently only supports `*` or a single number.
                  */
-                uint extraSeconds;
-                uint16 buf;
+                uint current = timestamp;
+                uint _next;
 
-                DateTime ct_next;
+                while (true) {
+                        _next = findNextSecond(current, ct_second);
+                        if (_next != current) {
+                                current = _next;
+                                continue;
+                        }
 
-                buf = uint16(getSecond(now));
-                ct_next.second = uint8(nextMatch(buf, ct_second, 59));
+                        _next = findNextMinute(current, ct_minute);
+                        if (_next != current) {
+                                current = _next;
+                                continue;
+                        }
+                        current = _next;
 
-                if (ct_next.second < buf) {
-                        extraSeconds += 60 - (buf - ct_next.second);
+                        _next = findNextHour(current, ct_hour);
+                        if (_next != current) {
+                                current = _next;
+                                continue;
+                        }
+                        current = _next;
+
+                        _next = findNextWeekday(current, ct_weekday);
+                        if (_next != current) {
+                                current = _next;
+                                continue;
+                        }
+                        current = _next;
+
+                        _next = findNextDay(current, ct_day);
+                        if (_next != current) {
+                                current = _next;
+                                continue;
+                        }
+                        current = _next;
+
+                        _next = findNextMonth(current, ct_month);
+                        if (_next != current) {
+                                current = _next;
+                                continue;
+                        }
+                        current = _next;
+
+                        _next = findNextYear(current, ct_year);
+                        if (_next != current) {
+                                current = _next;
+                                continue;
+                        }
+
+                        return _next;
+                }
+        }
+
+        function findNextSecond(uint timestamp, bytes2 ct_second) constant returns (uint) {
+                if (ct_second == STAR) {
+                        return timestamp;
+                }
+                uint8 target = uint8(_patternToNumber(ct_second));
+
+                if (target > 59) {
+                        // temporary solution until validation is implemented.
+                        __throw();
                 }
 
-                buf = uint16(getMinute(now + extraSeconds));
-                ct_next.minute = uint8(nextMatch(buf, ct_minute, 59));
+                uint8 current = getSecond(timestamp);
 
-                if (ct_next.minute < buf) {
-                        extraSeconds += MINUTE_IN_SECONDS * (60 - (buf - ct_next.minute));
+                if (current <= target) {
+                        return timestamp + (target - current);
+                }
+                return timestamp + target + 60 - current;
+        }
+
+        function findNextMinute(uint timestamp, bytes2 ct_minute) constant returns (uint) {
+                if (ct_minute == STAR) {
+                        return timestamp;
+                }
+                uint8 target = uint8(_patternToNumber(ct_minute));
+
+                if (target > 59) {
+                        // temporary solution until validation is implemented.
+                        __throw();
                 }
 
-                buf = uint16(getHour(now + extraSeconds));
-                ct_next.hour = uint8(nextMatch(buf, ct_hour, 59));
+                uint8 current = getMinute(timestamp);
 
-                if (ct_next.hour < buf) {
-                        extraSeconds += HOUR_IN_SECONDS * (24 - (buf - ct_next.hour));
+                if (current <= target) {
+                        return timestamp + MINUTE_IN_SECONDS * (target - current);
+                }
+                return timestamp + MINUTE_IN_SECONDS * (target + 60 - current);
+        }
+
+        function findNextHour(uint timestamp, bytes2 ct_hour) constant returns (uint) {
+                if (ct_hour == STAR) {
+                        return timestamp;
+                }
+                uint8 target = uint8(_patternToNumber(ct_hour));
+
+                if (target > 23) {
+                        // temporary solution until validation is implemented.
+                        __throw();
                 }
 
-                buf = uint16(getDay(now + extraSeconds));
-                uint8 _month = getMonth(now + extraSeconds);
-                uint16 _year = getYear(now + extraSeconds);
-                ct_next.day = uint8(nextMatch(buf, ct_day, getDaysInMonth(_month, _year), false));
-                if (ct_next.day == 0x0) {
-                        // Rolled over to the next month.
-                        if (_month == 12) {
-                                _month = 1;
-                                _year += 1;
+                uint8 current = getHour(timestamp);
+
+                if (current <= target) {
+                        return timestamp + HOUR_IN_SECONDS * (target - current);
+                }
+                return timestamp + HOUR_IN_SECONDS * (target + 24 - current);
+        }
+
+        function findNextWeekday(uint timestamp, bytes2 ct_weekday) constant returns (uint) {
+                if (ct_weekday == STAR) {
+                        return timestamp;
+                }
+                uint8 target = uint8(_patternToNumber(ct_weekday));
+
+                if (target > 6) {
+                        // temporary solution until validation is implemented.
+                        __throw();
+                }
+
+                uint8 current = getWeekday(timestamp);
+
+                if (current <= target) {
+                        return timestamp + DAY_IN_SECONDS * (target - current);
+                }
+                return timestamp + DAY_IN_SECONDS * (target + 7 - current);
+        }
+
+        function findNextDay(uint timestamp, bytes2 ct_day) constant returns (uint) {
+                if (ct_day == STAR) {
+                        return timestamp;
+                }
+                uint8 target = uint8(_patternToNumber(ct_day));
+
+                if (target < 1 || target > 31) {
+                        // temporary solution until validation is implemented.
+                        __throw();
+                }
+
+                uint _next = timestamp;
+
+                for (uint8 i = 0; i < 12; i++) {
+                        uint8 current = getDay(_next);
+                        uint8 current_month = getMonth(_next);
+                        uint8 days_in_month = getDaysInMonth(current_month, getYear(_next));
+
+                        if (target > days_in_month || current > target) {
+                                _next += DAY_IN_SECONDS * (days_in_month - current + 1);
+                                continue;
+                        }
+                        return _next + DAY_IN_SECONDS * (target - current);
+                }
+                // Shouldn't be possible since 
+                __throw();
+        }
+
+        function findNextMonth(uint timestamp, bytes2 ct_month) constant returns (uint) {
+                if (ct_month == STAR) {
+                        return timestamp;
+                }
+                uint8 target = uint8(_patternToNumber(ct_month));
+
+                if (target < 1 || target > 12) {
+                        // temporary solution until validation is implemented.
+                        __throw();
+                }
+
+                uint _next = timestamp;
+                uint8 current;
+                uint8 origin_day = getDay(timestamp);
+                uint8 current_day;
+                uint8 days_in_month;
+                uint8 days_in_next_month;
+
+                for (uint8 i = 0; i < 12; i++) {
+                        current = getMonth(_next);
+
+                        if (current == target) {
+                                return _next;
+                        }
+
+                        current_day = getDay(_next);
+                        days_in_month = getDaysInMonth(current, getYear(_next));
+                        if (current == 12) {
+                                days_in_next_month = getDaysInMonth(1, getYear(_next) + 1);
                         }
                         else {
-                                _month += 1;
+                                days_in_next_month = getDaysInMonth(current + 1, getYear(_next));
                         }
-                        ct_next.day = uint8(nextMatch(1, ct_day, min(buf - 1, getDaysInMonth(_month, _year)), false));
+
+                        _next += DAY_IN_SECONDS * (days_in_month - current_day + min(origin_day, days_in_next_month));
+                }
+                // Shouldn't be possible since 
+                __throw();
+        }
+
+        function findNextYear(uint timestamp, bytes4 ct_year) constant returns (uint) {
+                if (ct_year == STAR) {
+                        return timestamp;
+                }
+                uint16 target = _patternToNumber(ct_year);
+
+                if (target < getYear(timestamp) || target > 2099) {
+                        // temporary solution until validation is implemented.
+                        __throw();
                 }
 
-                if (ct_next.day < buf) {
-                        extraSeconds += DAY_IN_SECONDS * (getDaysInMonth(getMonth(now + extraSeconds), getYear(now + extraSeconds)) - buf + ct_next.day);
-                }
+                uint16 current = getYear(timestamp);
 
-                buf = uint8(getMonth(now + extraSeconds));
-                ct_next.month = uint8(nextMatch(buf, ct_month, 12, false));
+                uint numLeapYears = leapYearsBefore(target) - leapYearsBefore(current);
+                uint next = timestamp;
 
-                if (ct_next.month == 0x0) {
-                        if (buf == 12) {
-                                _month = 1;
+                next += LEAP_YEAR_IN_SECONDS * numLeapYears;
+                next += YEAR_IN_SECONDS * (target - current - numLeapYears);
+
+                if (getMonth(timestamp) >= 3) {
+                        if (isLeapYear(current) && !isLeapYear(target)) {
+                                next -= DAY_IN_SECONDS;
                         }
-                        else {
-                                _month = uint8(buf + 1);
+                        
+                        if (isLeapYear(target) && !isLeapYear(current)) {
+                                next += DAY_IN_SECONDS;
                         }
-                        ct_next.month = uint8(nextMatch(_month, ct_month, buf - 1, false));
+                }
+                else if (getMonth(timestamp) == 2 && getDay(timestamp) == 29 && !isLeapYear(target)) {
+                        next -= DAY_IN_SECONDS;
                 }
 
-                if (ct_next.month < buf) {
-                        buf = getYear(now + extraSeconds) + 1;
-                }
-                else {
-                        buf = getYear(now + extraSeconds);
-                }
+                return next;
+        }
 
-                ct_next.year = nextMatch(buf, ct_year, 2099, false);
-                if (ct_next.year == 0x0) {
-                        return 0x0;
+        function max(uint a, uint b) constant returns (uint) {
+                if (a >= b) {
+                        return a;
                 }
-
-                return toTimestamp(ct_next.year, ct_next.month, ct_next.day, ct_next.hour, ct_next.minute, ct_next.second);
+                return b;
         }
 
         function min(uint a, uint b) constant returns (uint) {
@@ -363,32 +523,5 @@ contract Crontab is DateTime {
                 }
 
                 return res;
-        }
-
-        function nextMatch(uint16 startValue, bytes2 pattern, uint maximum) returns (uint16) {
-                return nextMatch(startValue, pattern, maximum, true);
-        }
-
-        function nextMatch(uint16 startValue, bytes2 pattern, uint maximum, bool allowRollover) returns (uint16) {
-                if (pattern == "*") {
-                        return startValue;
-                }
-
-                uint16 i;
-                uint16 patternValue = _patternToNumber(pattern);
-
-                for (i = startValue; i <= maximum; i++) {
-                        if (i == patternValue) {
-                                return i;
-                        }
-                }
-                if (allowRollover) {
-                        for (i = 0; i < startValue; i++) {
-                                if (i == patternValue) {
-                                        return i;
-                                }
-                        }
-                }
-                return 0x0;
         }
 }
