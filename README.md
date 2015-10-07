@@ -37,3 +37,10 @@ based on the current `now` value.
 
 Returns the UNIX timestamp of the next occurrence for the provided expression
 after the provided `timestamp`.
+
+# TODO
+
+* Decide the fate of ``ct_seconds`` since we don't have second granularity on
+  the blockchain. (probably remove it)
+* Support for more complex cron expressions.
+* Support for passing entry in as a single expression.
