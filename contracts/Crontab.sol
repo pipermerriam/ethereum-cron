@@ -228,18 +228,6 @@ contract Crontab is DateTime {
 
         byte constant STAR = '*';
 
-        function _now() constant returns (uint) {
-                return now;
-        }
-
-        function next(bytes2 ct_minute, bytes2 ct_hour, bytes2 ct_day, bytes2 ct_month, bytes2 ct_weekday, bytes2 ct_year) constant returns (uint) {
-                return next(0, ct_minute, ct_hour, ct_day, ct_month, ct_weekday, ct_year, now);
-        }
-
-        function next(bytes2 ct_minute, bytes2 ct_hour, bytes2 ct_day, bytes2 ct_month, bytes2 ct_weekday, bytes2 ct_year, uint timestamp) constant returns (uint) {
-                return next(0, ct_minute, ct_hour, ct_day, ct_month, ct_weekday, ct_year, timestamp);
-        }
-
         function next(bytes2 ct_second, bytes2 ct_minute, bytes2 ct_hour, bytes2 ct_day, bytes2 ct_month, bytes2 ct_weekday, bytes2 ct_year) constant returns (uint) {
                 return next(ct_second, ct_minute, ct_hour, ct_day, ct_month, ct_weekday, ct_year, now);
         }
